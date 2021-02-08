@@ -11,7 +11,9 @@ import {
     isStyleElement,
     isSVGElementNode,
     isTextareaElement,
-    isTextNode
+    isTextNode,
+    isSlotElement,
+    isCustomElement
 } from './node-parser';
 import {Logger} from '../core/logger';
 import {isIdentToken, nonFunctionArgSeparator} from '../css/syntax/parser';
@@ -128,6 +130,9 @@ export class DocumentCloner {
         if (isStyleElement(node)) {
             return this.createStyleClone(node);
         }
+        if (isCustomElement(node)) {
+            return this.createCustomElementClone(node as HTMLElement);
+        }
 
         const clone = node.cloneNode(false) as T;
         // @ts-ignore
@@ -137,6 +142,20 @@ export class DocumentCloner {
         }
 
         return clone;
+    }
+
+    createCustomElementClone(node: HTMLElement): HTMLElement {
+        let customDiv = document.createElement('div');
+        if (typeof node.getAttributeNames === 'function') {
+            let attrNames = node.getAttributeNames();
+            for (let i = 0; i < attrNames.length; i += 1) {
+                let attrName = attrNames[i];
+                let attrValue = node.getAttribute(attrName) as string;
+                customDiv.setAttribute(attrName, attrValue);
+            }
+        }
+
+        return customDiv as HTMLElement;
     }
 
     createStyleClone(node: HTMLStyleElement): HTMLStyleElement {
@@ -282,7 +301,19 @@ export class DocumentCloner {
             const counters = this.counters.parse(new CSSParsedCounterDeclaration(style));
             const before = this.resolvePseudoContent(node, clone, styleBefore, PseudoElementType.BEFORE);
 
-            for (let child = node.firstChild; child; child = child.nextSibling) {
+            let children = node.shadowRoot ? Array.from(node.shadowRoot.childNodes) : Array.from(node.childNodes);
+            for (let i = 0; i < children.length; i++) {
+                let child = children[i] as Node;
+                if (isSlotElement(child)) {
+                    let assignedNodes = child.assignedNodes() as ChildNode[];
+                    if (assignedNodes.length > 0) {
+                        // replace the slot element with its assigned nodes, and then process them immediately
+                        children.splice(i, 1, ...Array.from(assignedNodes));
+                        i -= 1;
+                        continue;
+                    }
+                }
+
                 if (
                     !isElementNode(child) ||
                     (!isScriptElement(child) &&
